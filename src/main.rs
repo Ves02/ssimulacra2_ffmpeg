@@ -5,8 +5,9 @@ use std::io::Read;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-// use std::sync::{Arc, RwLock};
-use std::thread::{self, spawn};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use threadpool::ThreadPool;
 
 struct Resolution {
     width: usize,
@@ -41,26 +42,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     let file2 = matches.get_one::<PathBuf>("distorted").unwrap();
     let mut imgs2 = ffmpeg_get_frames_bgrpf32le(&file2)?;
 
-    let mut scores = Vec::new();
-    let mut handles = Vec::new();
+    let scores = Arc::new(Mutex::new(Vec::new()));
+
+    let pool = ThreadPool::new(avail_threads.into());
     println!("\nComparision in progress...");
     while let (Some(img1), Some(img2)) = (imgs1.pop(), imgs2.pop()) {
-        let thread_fn = move |img1: LinearRgb, img2: LinearRgb| {
-            let result = compute_frame_ssimulacra2(img1, img2).expect("Failed to calculate ssimulacra2");
-            println!("{:.8}", result);
-            return result;
-        };
-
-        let handle = thread::spawn(move || thread_fn(img1, img2));
-        handles.push(handle);
+        let scores = Arc::clone(&scores);
+        pool.execute(move || {
+            let result =
+                compute_frame_ssimulacra2(img1, img2).expect("Failed to calculate ssimulacra2");
+            println!("{}", result);
+            let mut scores = scores.lock().unwrap();
+            scores.push(result);
+        });
     }
 
-    for handle in handles {
-        let result = handle.join().expect("Thread panicked");
-        scores.push(result);
-    }
-
-    calculate_scores(scores);
+    pool.join();
+    let scores = scores.lock().unwrap();
+    calculate_scores(scores.clone());
 
     Ok(())
 }
