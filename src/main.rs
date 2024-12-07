@@ -6,7 +6,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 // use std::sync::{Arc, RwLock};
-// use std::{iter, thread};
+use std::thread::{self, spawn};
 
 struct Resolution {
     width: usize,
@@ -21,6 +21,7 @@ impl Resolution {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let avail_threads = thread::available_parallelism().unwrap();
     let matches = command!()
         .arg(
             arg!([source] "Source video or image(s)")
@@ -41,14 +42,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut imgs2 = ffmpeg_get_frames_bgrpf32le(&file2)?;
 
     let mut scores = Vec::new();
-
+    let mut handles = Vec::new();
     println!("\nComparision in progress...");
     while let (Some(img1), Some(img2)) = (imgs1.pop(), imgs2.pop()) {
-        let result =
-            compute_frame_ssimulacra2(img1, img2).expect("Failed to calculate ssimulacra2");
-        println!("{}", result);
+        let thread_fn = move |img1: LinearRgb, img2: LinearRgb| {
+            let result = compute_frame_ssimulacra2(img1, img2).expect("Failed to calculate ssimulacra2");
+            println!("{:.8}", result);
+            return result;
+        };
+
+        let handle = thread::spawn(move || thread_fn(img1, img2));
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        let result = handle.join().expect("Thread panicked");
         scores.push(result);
     }
+
     calculate_scores(scores);
 
     Ok(())
@@ -147,8 +158,8 @@ fn ffmpeg_get_frames_bgrpf32le(file: &Path) -> Result<Vec<LinearRgb>, Box<dyn Er
     let mut child = Command::new("ffmpeg")
         .arg("-i")
         .arg(file)
-        .arg("-vf") 
-        .arg("zscale=t=linear:npl=100") 
+        .arg("-vf")
+        .arg("zscale=t=linear:npl=100")
         .arg("-pix_fmt")
         .arg("gbrpf32le")
         .arg("-f")
@@ -246,9 +257,7 @@ fn calculate_scores(mut scores: Vec<f64>) {
     };
 
     // Calculate Standard Deviation
-    let variance = scores.iter()
-        .map(|&x| (x - mean).powi(2))
-        .sum::<f64>() / scores.len() as f64;
+    let variance = scores.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / scores.len() as f64;
     let std_dev = variance.sqrt();
 
     // Calculate 5th and 95th Percentiles
@@ -263,7 +272,7 @@ fn calculate_scores(mut scores: Vec<f64>) {
     let p95 = percentile(0.95);
 
     // Print Results
-    println!("Mean: {:.8}", mean);
+    println!("\nMean: {:.8}", mean);
     println!("Median: {:.8}", median);
     println!("Std Dev: {:.8}", std_dev);
     println!("5th Percentile: {:.8}", p5);
