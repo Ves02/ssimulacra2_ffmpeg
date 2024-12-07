@@ -147,6 +147,8 @@ fn ffmpeg_get_frames_bgrpf32le(file: &Path) -> Result<Vec<LinearRgb>, Box<dyn Er
     let mut child = Command::new("ffmpeg")
         .arg("-i")
         .arg(file)
+        .arg("-vf") 
+        .arg("zscale=t=linear:npl=100") 
         .arg("-pix_fmt")
         .arg("gbrpf32le")
         .arg("-f")
