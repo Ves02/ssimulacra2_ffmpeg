@@ -15,7 +15,7 @@ This is a proof of concept, it's not optimized and it will load a whole file int
 There may be logic error, please submit an issue if you find one.
 
 It will run single thread, so it will be very slow.
-Score from ssimulacra2_rs differ from ssimulacra2_ffmpeg. Potentially due to colorspace in ssimulacra2_rs being bt.709
+Score from ssimulacra2_rs differ from ssimulacra2_ffmpeg. Potentially due to colorspace problem. Need to somehow handle unknown colorspace.
 
 Run the command:
 
