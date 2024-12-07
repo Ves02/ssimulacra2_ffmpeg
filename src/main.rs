@@ -151,17 +151,21 @@ fn ffprobe_get_resolution(file: &Path) -> Result<Resolution, String> {
 // gbrpf32le is the next best alternative, you need to swap green and red channel position.
 // ffmpeg -i input_file -vf zscale=t=linear:npl=100 -pix_fmt gbrpf32le -f rawvideo -
 fn ffmpeg_get_frames_bgrpf32le(file: &Path) -> Result<Vec<LinearRgb>, Box<dyn Error>> {
-    // fix the colorspace problem soon
+    // fix the colorspace, color_trc, and color_primaries where it's unknown, otherwise crash since ffmpeg need those info for zscale=t=linear
     let frame_count = ffprobe_get_num_frames(&file)?;
     let resolution = ffprobe_get_resolution(&file)?;
 
     let mut child = Command::new("ffmpeg")
+        // .arg("-color_trc")
+        // .arg("bt709")
+        // .arg("-color_primaries")
+        // .arg("bt709")
         // .arg("-colorspace")
         // .arg("rgb")
         .arg("-i")
         .arg(file)
-        // .arg("-vf")
-        // .arg("zscale=t=linear:npl=100")
+        .arg("-vf")
+        .arg("zscale=t=linear:npl=100")
         .arg("-pix_fmt")
         .arg("gbrpf32le")
         .arg("-f")
