@@ -149,16 +149,18 @@ fn ffprobe_get_resolution(file: &Path) -> Result<Resolution, String> {
 
 // for some reason, you can't do rgbf32le even though it exist on https://ffmpeg.org/doxygen/trunk/pixfmt_8h_source.html
 // gbrpf32le is the next best alternative, you need to swap green and red channel position.
-// ffmpeg -i input_file -pix_fmt gbrpf32le -f rawvideo -
+// ffmpeg -i input_file -vf zscale=t=linear:npl=100 -pix_fmt gbrpf32le -f rawvideo -
 fn ffmpeg_get_frames_bgrpf32le(file: &Path) -> Result<Vec<LinearRgb>, Box<dyn Error>> {
     let frame_count = ffprobe_get_num_frames(&file)?;
     let resolution = ffprobe_get_resolution(&file)?;
 
     let mut child = Command::new("ffmpeg")
+        // .arg("-colorspace")
+        // .arg("rgb")
         .arg("-i")
         .arg(file)
-        .arg("-vf")
-        .arg("zscale=t=linear:npl=100")
+        // .arg("-vf")
+        // .arg("zscale=t=linear:npl=100")
         .arg("-pix_fmt")
         .arg("gbrpf32le")
         .arg("-f")
