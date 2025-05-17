@@ -2,9 +2,7 @@ use bytemuck;
 use clap::{arg, command, value_parser};
 use ffmpeg_sidecar::command::*;
 use ssimulacra2::{compute_frame_ssimulacra2, LinearRgb};
-use std::ffi::OsString;
 use std::io::{self, Write};
-use std::path::PathBuf;
 use std::process::Command;
 use std::collections::HashMap;
 // use std::path::{Path, PathBuf};
@@ -37,8 +35,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     
 
     while let (Some(s_frame), Some(d_frame)) = (s_preprocessed.next(), d_preprocessed.next()) {
-        // compute_frame_ssimulacra2(source, distorted);
-    
+        let score = compute_frame_ssimulacra2(s_frame, d_frame).unwrap();
+        println!("{}", score);
     }
 
     return Ok(());
@@ -127,7 +125,7 @@ fn ffprobe_get_color_metadata<S: AsRef<str>>(file: S) -> Result<HashMap<String, 
 
     // Split the resolution by ',' and parse the components into integers
     let mut parts: Vec<&str> = output.split(",").collect();
-    println!("{:?}", parts);
+    // println!("{:?}", parts);
     if parts.len() != 3 {
         return Err("Could not get 3 keys".into());
     }
