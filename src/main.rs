@@ -2,7 +2,11 @@ use bytemuck;
 use clap::{arg, command, value_parser};
 use ffmpeg_sidecar::command::*;
 use ssimulacra2::{compute_frame_ssimulacra2, LinearRgb};
+use std::ffi::OsString;
 use std::io::{self, Write};
+use std::path::PathBuf;
+use std::process::Command;
+use std::collections::HashMap;
 // use std::path::{Path, PathBuf};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,35 +27,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .get_matches();
 
     let source = matches.get_one::<String>("source").unwrap();
+    let mut s_metadata = ffprobe_get_color_metadata(source)?;
+
+    if s_metadata.get("color_space") == Some(&"unknown".to_string()) {
+        println!("color space not found, defaulting to bt709");
+        s_metadata.insert("color_space".to_string(), "bt709".to_string());
+    }
+    if s_metadata.get("color_primaries") == Some(&"unknown".to_string()) {
+        println!("color primaries not found, defaulting to bt709");
+        s_metadata.insert("color_primaries".to_string(), "bt709".to_string());
+    }
+    if s_metadata.get("color_transfer") == Some(&"unknown".to_string()) {
+        println!("color space not found, defaulting to bt709");
+        s_metadata.insert("color_transfer".to_string(), "bt709".to_string());
+    }
+
+    let zscale = format!("zscale=primariesin={}:transferin={}:matrixin={}:transfer=linear", s_metadata.get("color_primaries").unwrap(), s_metadata.get("color_transfer").unwrap(), s_metadata.get("color_space").unwrap());
+    println!("{:?}",zscale);
+
     // ffmpeg libswscale/output.c does not support rgbf32le, which is more ideal output format. We will have to convert to rgbf32le.
     let source_iter = FfmpegCommand::new()
         .input(source)
         .pix_fmt("gbrpf32le")
         .fps_mode("passthrough")
+        .filter(zscale)
         .format("rawvideo")
         .pipe_stdout()
         // .print_command()
         .spawn()?
         .iter()?;
 
-    for frame in source_iter.filter_frames() { 
-        println!("{:?}", frame.data);
+    // for frame in source_iter.filter_frames() { 
+    //     println!("{:?}", frame.data);
+    // }
+
+    // let distorted = matches.get_one::<String>("distorted").unwrap();
+    // let distorted_iter = FfmpegCommand::new()
+    //     .input(source)
+    //     .pix_fmt("gbrpf32le")
+    //     .codec_video("rawvideo")
+    //     .fps_mode("passthrough")
+    //     .pipe_stdout()
+    //     .print_command()
+    //     .spawn()?
+    //     .iter()?;
+
+    let mut s_frames = source_iter.filter_frames();
+    // let mut d_frames = distorted_iter.filter_frames();
+
+
+    let mut s_preprocessed: Vec<LinearRgb>= Vec::new();
+    while let (Some(s_frame)) = s_frames.next() { 
+        let s_data = convert_bgrpf32le_to_rgbf32le(s_frame.data);
+        let s_frame_ready = LinearRgb::new(s_data, s_frame.width.try_into().unwrap(), s_frame.height.try_into().unwrap());
+        s_preprocessed.push(s_frame_ready.unwrap());
+
     }
-
-    let distorted = matches.get_one::<String>("distorted").unwrap();
-    let distorted_iter = FfmpegCommand::new()
-        .input(source)
-        .pix_fmt("gbrpf32le")
-        .codec_video("rawvideo")
-        .fps_mode("passthrough")
-        .pipe_stdout()
-        .print_command()
-        .spawn()?
-        .iter()?;
-
-    // let mut s_frames = source_iter.filter_frames();
-    let mut d_frames = distorted_iter.filter_frames();
-
     // while let (Some(s_frame), Some(d_frame)) = (s_frames.next(), d_frames.next()) {
     //     let s_data: &[f32] = bytemuck::cast_slice(&s_frame.data);
     //     println!("{:?}", s_data);
@@ -92,6 +123,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 // let d_data = rgb;
 
 
+fn ffprobe_get_color_metadata<S: AsRef<str>>(file: S) -> Result<HashMap<String, String>, String> {
+    // ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0;
+    let output = Command::new("ffprobe")
+        .arg("-v")
+        .arg("error")
+        .arg("-select_streams")
+        .arg("v:0")
+        .arg("-show_entries")
+        .arg("stream=color_space,color_transfer,color_primaries")
+        .arg("-of")
+        .arg("csv=p=0")
+        .arg(file.as_ref())
+        .output()
+        .map_err(|e| format!("Failed to execute ffprobe: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(format!("ffprobe error: {stderr}"));
+    }
+
+    let output = String::from_utf8(output.stdout)
+        .map_err(|e| format!("Failed to convert ffprobe output to UTF-8: {}", e))?;
+
+    let output = output.trim();
+    if output.is_empty() {
+        return Err("No resolution found.".into());
+    }
+
+    // Split the resolution by ',' and parse the components into integers
+    let mut parts: Vec<&str> = output.split(",").collect();
+    println!("{:?}", parts);
+    if parts.len() != 3 {
+        return Err("Could not get 3 keys".into());
+    }
+
+    let mut metadata: HashMap<String, String> = HashMap::new();
+
+    // for part in parts {
+    //     if let Some((key, value)) = part.split_once('=') {
+    //         metadata.insert(key.to_string(), value.to_string());
+    //     }
+    // }
+
+    // color_space,color_transfer,color_primaries
+    metadata.insert("color_space".into(), parts.pop().unwrap().into());
+    metadata.insert("color_transfer".into(), parts.pop().unwrap().into());
+    metadata.insert("color_primaries".into(), parts.pop().unwrap().into());
+
+    Ok(metadata)
+}
 
 fn convert_bgrpf32le_to_rgbf32le(input: Vec<u8>) -> Vec<[f32; 3]>{
     let input: &[f32] = bytemuck::cast_slice(&input);
